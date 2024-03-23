@@ -1,0 +1,2 @@
+# McNeillTuratkhan_ENV797_TSA_Competition
+Time Series Analysis Forecasting Competition McNeill and Turatkhan
