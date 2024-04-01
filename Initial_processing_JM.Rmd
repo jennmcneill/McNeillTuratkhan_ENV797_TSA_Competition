@@ -1,7 +1,7 @@
 ---
 title: "TSA: Part 2 of Kaggle competition"
-author: "Zhanylai T"
-date: "03/31/2024"
+author: "Jenn McNeill"
+date: "04/01/2024"
 output: pdf_document
 always_allow_html: true
 editor_options: 
@@ -24,48 +24,135 @@ library(kableExtra)
 library(readxl)
 ```
 
-```{r}
-# getwd() to find out a path way
-file_path <- "/home/guest/TSA_Janka/McNeillTuratkhan_ENV797_TSA_Competition/Data_NoGIT/Raw/load.xlsx"
-data <- read_excel(file_path)
+```{r load data}
 
+file_path <- "./Data_NoGIT/Raw/load.xlsx"
+data <- read_excel(path = file_path)
 head(data)
+
 ``` 
 
-```{r}
-data <- data %>%
-  rowwise() %>%
-  mutate(average_load = mean(c_across(h1:h24), na.rm = TRUE))
+```{r prepare data}
 
-head(data)
+# create df with hourly values
+hourly_data <- data %>%
+  pivot_longer(h1:h24, names_to = "hour", values_to = "load") %>%
+  mutate(hour = as.numeric(str_replace(hour, "h", ""))) %>%
+  mutate(hour = hour - 1) %>%
+  mutate(datetime = ymd_h(paste(date, hour, sep = " "))) %>%
+  select(date, hour, datetime, load) 
+  
+# create df with daily averages
+daily_data <- hourly_data %>%
+  filter(!is.na(load)) %>%
+  group_by(date) %>%
+  summarise(average_load = mean(load))
+
+# check for NAs
+summary(hourly_data$load)
+# there are 7 missing hourly values, so we will need to run tsclean if we are using hourly data to make a time series
+
+summary(daily_data$average_load)
+# there are no NAs in the daily average data, so we can make a time series without running the tsclean function
+
+# plot the daily values
+ggplot(hourly_data, aes(x = datetime, y = load)) +
+  geom_line() +
+  ylab("Hourly Load")
+
+# plot the daily averages
+ggplot(daily_data, aes(x = date, y = average_load)) +
+  geom_line() +
+  ylab("Average Daily Load")
+
 ```
 
-```{r}
-data_filtered <- data %>% 
-  filter(date >= as.Date('2005-01-01') & date <= as.Date('2011-05-31'))
 
-time_series_data_ts <- ts(data_filtered$average_load, frequency = 365.25)
+```{r create time series objects}
+
+ts_hourly <- msts(hourly_data$load, 
+                  seasonal.periods = c(24,168,8766), 
+                  start = c(2005,1,1)) 
+tsclean(ts_hourly)
+
+ts_daily <- msts(daily_data$average_load, 
+                 seasonal.periods = c(7,365.25),
+                 start=c(2005,1,1))
 ```
 
-```{r}
-fit_arima <- auto.arima(time_series_data_ts)
+```{r decompose time series objects}
+
+ts_hourly %>% 
+  mstl() %>%
+  autoplot()
+
+ts_daily %>% 
+  mstl() %>%
+  autoplot()
+
 ```
 
-```{r}
-summary(fit_arima)
+```{r subset daily time series}
+
+# create a subset of the time series that excludes 365 days
+n_for = 365
+ts_daily_training <- subset(ts_daily, end = length(ts_daily) - n_for)
+
+# create a subset of the time series that only includes the last 365 days
+ts_daily_testing <- subset(ts_daily, start = length(ts_daily) - n_for)
+
+autoplot(ts_daily_training)
+autoplot(ts_daily_testing)
 ```
 
-```{r}
-test_data <- data %>%
-  filter(date >= as.Date('2010-06-01') & date < as.Date('2010-07-01'))
+```{r STL + ETS Model}
 
-forecast_arima <- forecast(fit_arima, h = length(test_data$average_load))
+# fit and forecast STL + ETS model to data
+ETS_fit <-  stlf(ts_daily_training, h = 365)
+
+# plot foresting results
+autoplot(ETS_fit) + 
+  ylab("Daily Load") + 
+  theme_light()
+
+# plot model + observed data
+autoplot(ts_daily, series = "Original") +
+  autolayer(ETS_fit, series = "STL + ETS", PI = FALSE) +
+  ylab("Daily Load") +
+  theme_light()
+
+# check the MAPE
+STL_ETS_scores <- accuracy(ETS_fit$mean, ts_daily_testing)
+
 ```
 
-```{r}
-mape_arima <- mean(abs((test_data$average_load - forecast_arima$mean) / test_data$average_load), na.rm = TRUE) * 100
+```{r ARIMA and Fourier Model}
 
-# Print the MAPE value
-print(mape_arima)
+ARIMA_Fourier_fit_1 <- auto.arima(ts_daily_training, 
+                             seasonal = FALSE, 
+                             lambda = 0,
+                             xreg = fourier(ts_daily_training, 
+                                            K=c(2,12)))
+
+ARIMA_Fourier_forecast_1 <- forecast(ARIMA_Fourier_fit,
+                                   xreg=fourier(ts_daily_training,
+                                                K = c(2,12), h = 365), h=365) 
+
+# plot foresting results
+autoplot(ARIMA_Fourier_forecast_1) + 
+  ylab("Daily Load") + 
+  theme_light()
+
+# plot model + observed data
+autoplot(ts_daily, series = "Original") +
+  autolayer(ARIMA_Fourier_forecast_1, series = "ARIMA FOURIER 1", PI = FALSE) +
+  ylab("Daily Load") +
+  theme_light()
+
+# check the MAPE
+ARIMA_Fourier_scores_1 <- accuracy(ARIMA_Fourier_forecast_1$mean, ts_daily_testing)
+
 ```
+
+
 
