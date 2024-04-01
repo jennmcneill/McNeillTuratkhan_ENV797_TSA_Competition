@@ -1,0 +1,71 @@
+---
+title: "TSA: Part 2 of Kaggle competition"
+author: "Zhanylai T"
+date: "03/31/2024"
+output: pdf_document
+always_allow_html: true
+editor_options: 
+  chunk_output_type: console
+  markdown: 
+    wrap: sentence
+---
+
+```{r}
+library(lubridate)
+library(ggplot2)
+library(forecast)
+library(Kendall)
+library(tseries)
+library(outliers)
+library(tidyverse)
+library(smooth)
+library(zoo)
+library(kableExtra)
+library(readxl)
+```
+
+```{r}
+# getwd() to find out a path way
+file_path <- "/home/guest/TSA_Janka/McNeillTuratkhan_ENV797_TSA_Competition/Data_NoGIT/Raw/load.xlsx"
+data <- read_excel(file_path)
+
+head(data)
+``` 
+
+```{r}
+data <- data %>%
+  rowwise() %>%
+  mutate(average_load = mean(c_across(h1:h24), na.rm = TRUE))
+
+head(data)
+```
+
+```{r}
+data_filtered <- data %>% 
+  filter(date >= as.Date('2005-01-01') & date <= as.Date('2011-05-31'))
+
+time_series_data_ts <- ts(data_filtered$average_load, frequency = 365.25)
+```
+
+```{r}
+fit_arima <- auto.arima(time_series_data_ts)
+```
+
+```{r}
+summary(fit_arima)
+```
+
+```{r}
+test_data <- data %>%
+  filter(date >= as.Date('2010-06-01') & date < as.Date('2010-07-01'))
+
+forecast_arima <- forecast(fit_arima, h = length(test_data$average_load))
+```
+
+```{r}
+mape_arima <- mean(abs((test_data$average_load - forecast_arima$mean) / test_data$average_load), na.rm = TRUE) * 100
+
+# Print the MAPE value
+print(mape_arima)
+```
+
