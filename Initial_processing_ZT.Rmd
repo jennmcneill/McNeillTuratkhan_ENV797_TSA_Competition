@@ -1,6 +1,6 @@
 ---
-title: "TSA: Part 2 of Kaggle competition"
-author: "Zhanylai T"
+title: "TSA: Part 3 of Kaggle competition"
+author: "ZT, JM"
 date: "03/31/2024"
 output: pdf_document
 always_allow_html: true
@@ -32,40 +32,102 @@ data <- read_excel(file_path)
 head(data)
 ``` 
 
-```{r}
-data <- data %>%
-  rowwise() %>%
-  mutate(average_load = mean(c_across(h1:h24), na.rm = TRUE))
+```{r prepare data}
 
-head(data)
+# create df with hourly values
+hourly_data <- data %>%
+  pivot_longer(h1:h24, names_to = "hour", values_to = "load") %>%
+  mutate(hour = as.numeric(str_replace(hour, "h", ""))) %>%
+  mutate(hour = hour - 1) %>%
+  mutate(datetime = ymd_h(paste(date, hour, sep = " "))) %>%
+  select(date, hour, datetime, load) 
+  
+# create df with daily averages
+daily_data <- hourly_data %>%
+  filter(!is.na(load)) %>%
+  group_by(date) %>%
+  summarise(average_load = mean(load))
+
+# check for NAs
+summary(hourly_data$load)
+# there are 7 missing hourly values, so we will need to run tsclean if we are using hourly data to make a time series
+
+summary(daily_data$average_load)
+# there are no NAs in the daily average data, so we can make a time series without running the tsclean function
+
+# plot the daily values
+ggplot(hourly_data, aes(x = datetime, y = load)) +
+  geom_line() +
+  ylab("Hourly Load")
+
+# plot the daily averages
+ggplot(daily_data, aes(x = date, y = average_load)) +
+  geom_line() +
+  ylab("Average Daily Load")
+
+```
+
+```{r create time series objects}
+
+ts_hourly <- msts(hourly_data$load, 
+                  seasonal.periods = c(24,168,8766), 
+                  start = c(2005,1,1)) 
+tsclean(ts_hourly)
+
+ts_daily <- msts(daily_data$average_load, 
+                 seasonal.periods = c(7,365.25),
+                 start=c(2005,1,1))
+```
+
+```{r decompose time series objects}
+
+ts_hourly %>% 
+  mstl() %>%
+  autoplot()
+
+ts_daily %>% 
+  mstl() %>%
+  autoplot()
+
+```
+
+```{r subset daily time series}
+
+# create a subset of the time series that excludes one month
+n_for = 31
+ts_daily_training <- subset(ts_daily, end = length(ts_daily) - n_for)
+
+# create a subset of the time series that only includes the last 365 days
+ts_daily_testing <- subset(ts_daily, start = length(ts_daily) - n_for)
+
+autoplot(ts_daily_training)
+autoplot(ts_daily_testing)
+```
+
+
+```{r STL + ETS Model}
+
+# fit and forecast STL + ETS model to data
+ETS_fit <-  stlf(ts_daily_training, h = 31)
+
+# plot foresting results
+autoplot(ETS_fit) + 
+  ylab("Daily Load") + 
+  theme_light()
+
+# plot model + observed data
+autoplot(ts_daily, series = "Original") +
+  autolayer(ETS_fit, series = "STL + ETS", PI = FALSE) +
+  ylab("Daily Load") +
+  theme_light()
+
+# check the MAPE
+STL_ETS_scores <- accuracy(ETS_fit$mean, ts_daily_testing)
+
+STL_ETS_forecast <- ETS_fit$mean
 ```
 
 ```{r}
-data_filtered <- data %>% 
-  filter(date >= as.Date('2005-01-01') & date <= as.Date('2011-05-31'))
 
-time_series_data_ts <- ts(data_filtered$average_load, frequency = 365.25)
-```
-
-```{r}
-fit_arima <- auto.arima(time_series_data_ts)
-```
-
-```{r}
-summary(fit_arima)
-```
-
-```{r}
-test_data <- data %>%
-  filter(date >= as.Date('2010-06-01') & date < as.Date('2010-07-01'))
-
-forecast_arima <- forecast(fit_arima, h = length(test_data$average_load))
-```
-
-```{r}
-mape_arima <- mean(abs((test_data$average_load - forecast_arima$mean) / test_data$average_load), na.rm = TRUE) * 100
-
-# Print the MAPE value
-print(mape_arima)
 ```
 
