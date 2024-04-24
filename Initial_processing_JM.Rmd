@@ -119,7 +119,7 @@ ts_load_daily %>%
 
 ```
 
-```{r subset daily time series}
+```{r subset daily time series for training and testing}
 
 # create a subset of the time series that excludes one month
 n_for = 31
@@ -127,6 +127,14 @@ ts_load_daily_training <- subset(ts_load_daily, end = length(ts_load_daily) - n_
 
 # create a subset of the time series that only includes the last 365 days
 ts_load_daily_testing <- subset(ts_load_daily, start = length(ts_load_daily) - n_for)
+
+# rain_monthly_training_reg <- subset(ts_rain_monthly_reg, end = length(ts_rain_monthly_reg) - n_for_month)
+#   
+# rain_monthly_testing_reg <- subset(ts_rain_monthly_reg, start = length(ts_rain_monthly_reg) - n_for_month)
+# 
+# temp_monthly_training_reg <- subset(ts_temp_monthly_reg, end = length(ts_temp_monthly_reg) - n_for_month)
+#   
+# temp_monthly_testing_reg <- subset(ts_temp_monthly_reg, start = length(ts_temp_monthly_reg) - n_for_month)
 
 autoplot(ts_load_daily_training)
 autoplot(ts_load_daily_testing)
