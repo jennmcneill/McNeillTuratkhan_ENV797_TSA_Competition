@@ -247,3 +247,7 @@ auto_with_humidity_reg_scores <- accuracy(auto_with_humidity_reg_test$mean, ts_l
 print(auto_with_humidity_reg_scores)
 
 ```
+
+
+
+
