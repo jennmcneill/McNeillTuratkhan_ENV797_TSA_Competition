@@ -76,7 +76,8 @@ ggplot(daily_data, aes(x = date, y = average_load)) +
 daily_temp <- temperature %>%
   pivot_longer(t_ws1:t_ws28, names_to = "site", values_to = "temperature") %>%
   group_by(date) %>%
-  summarise(average_temp = mean(temperature))
+  summarise(average_temp = mean(temperature)) %>%
+  slice(1:2372)
 
 # create df with daily relative humidity averages
 daily_humidity <- humidity %>%
@@ -125,16 +126,16 @@ ts_load_daily %>%
 n_for = 31
 ts_load_daily_training <- subset(ts_load_daily, end = length(ts_load_daily) - n_for)
 
-# create a subset of the time series that only includes the last 365 days
+# create a subset of the time series that only includes the last month
 ts_load_daily_testing <- subset(ts_load_daily, start = length(ts_load_daily) - n_for)
 
-# rain_monthly_training_reg <- subset(ts_rain_monthly_reg, end = length(ts_rain_monthly_reg) - n_for_month)
-#   
-# rain_monthly_testing_reg <- subset(ts_rain_monthly_reg, start = length(ts_rain_monthly_reg) - n_for_month)
-# 
-# temp_monthly_training_reg <- subset(ts_temp_monthly_reg, end = length(ts_temp_monthly_reg) - n_for_month)
-#   
-# temp_monthly_testing_reg <- subset(ts_temp_monthly_reg, start = length(ts_temp_monthly_reg) - n_for_month)
+# repeat the process for temperature regressor
+ts_temp_daily_training <- subset(ts_temp_daily, end = length(ts_temp_daily) - n_for)
+ts_temp_daily_testing <- subset(ts_temp_daily, start = length(ts_temp_daily) - n_for)
+
+# repeat the process for humidity regressor
+ts_humidity_daily_training <- subset(ts_humidity_daily, end = length(ts_humidity_daily) - n_for)
+ts_humidity_daily_testing <- subset(ts_humidity_daily, start = length(ts_humidity_daily) - n_for)
 
 autoplot(ts_load_daily_training)
 autoplot(ts_load_daily_testing)
@@ -158,6 +159,7 @@ autoplot(ts_load_daily, series = "Original") +
 
 # check the MAPE
 STL_ETS_scores <- accuracy(ETS_fit$mean, ts_load_daily_testing)
+print(STL_ETS_scores)
 
 STL_ETS_forecast <- ETS_fit$mean
 
@@ -169,66 +171,66 @@ write.table(submission_template, "submission.csv", sep = ",", row.names = FALSE,
 
 ```
 
+```{r Auto Arima with Temperature Regressor}
 
+auto_with_temp_reg <- auto.arima(ts_load_daily_training, seasonal=FALSE, 
+                             lambda=0, xreg=fourier(ts_temp_daily_training, K=c(2,12)))
 
-
-```{r ARIMA and Fourier Model 1}
-
-ARIMA_Fourier_fit_1 <- auto.arima(ts_daily_training, 
-                             seasonal = FALSE, 
-                             lambda = 0,
-                             xreg = fourier(ts_daily_training, 
-                                            K=c(2,12)))
-
-ARIMA_Fourier_forecast_1 <- forecast(ARIMA_Fourier_fit_1,
-                                   xreg=fourier(ts_daily_training,
-                                                K = c(2,12), h = 31), h=31) 
-
-# plot foresting results
-autoplot(ARIMA_Fourier_forecast_1) + 
-  ylab("Daily Load") + 
+auto_with_temp_reg_forecast <- forecast(auto_with_temp_reg, 
+                                        xreg=fourier(ts_temp_daily_training, K=c(2,12), h=31),
+                                        h=31)
+               
+#plot foresting results
+autoplot(auto_with_temp_reg_forecast) + 
   theme_light()
 
-# plot model + observed data
-autoplot(ts_daily, series = "Original") +
-  autolayer(ARIMA_Fourier_forecast_1, series = "ARIMA FOURIER 1", PI = FALSE) +
-  ylab("Daily Load") +
+#plot model + observed data
+autoplot(ts_load_daily, series = "Original") +
+  autolayer(auto_with_temp_reg_forecast, series = "Auto Sarima W/ Temp Reg", PI = FALSE) +
   theme_light()
 
-# check the MAPE
-ARIMA_Fourier_scores_1 <- accuracy(ARIMA_Fourier_forecast_1$mean, ts_daily_testing)
-ARIMA_Fourier_scores_1
+#check the MAPE
+auto_with_temp_reg_scores <- accuracy(auto_with_temp_reg_forecast$mean, ts_load_daily_testing)
+print(auto_with_temp_reg_scores)
 
-forecast_1 <- as.numeric(ARIMA_Fourier_forecast_1$mean)
-print(forecast_1)
+arima_temp_forecast <- auto_with_temp_reg_forecast$mean
+
+getwd()
+submission_template <- read.csv(file="./submission_template.csv", header=TRUE)
+submission_template$date <- as.Date(submission_template$date, format = "%m/%d/%y")
+submission_template$load <- arima_temp_forecast
+write.table(submission_template, "submission.csv", sep = ",", row.names = FALSE, quote = FALSE)
 
 ```
 
+```{r Auto Arima with Humidity Regressor}
 
-```{r ARIMA and Fourier Model 2}
+auto_with_humidity_reg <- auto.arima(ts_load_daily_training, seasonal=FALSE, 
+                             lambda=0, xreg=fourier(ts_humidity_daily_training, K=c(2,4)))
 
-ARIMA_Fourier_fit_2 <- auto.arima(ts_daily_training, 
-                             seasonal = FALSE, 
-                             lambda = 0,
-                             xreg = fourier(ts_daily_training, 
-                                            K=c(2,6)))
-
-ARIMA_Fourier_forecast_2 <- forecast(ARIMA_Fourier_fit_2,
-                                   xreg=fourier(ts_daily_training,
-                                                K = c(2,6), h = 31), h=31) 
-
-# plot foresting results
-autoplot(ARIMA_Fourier_forecast_2) + 
-  ylab("Daily Load") + 
+auto_with_humidity_reg_forecast <- forecast(auto_with_humidity_reg, 
+                                        xreg=fourier(ts_humidity_daily_training, K=c(2,4), h=31),
+                                        h=31)
+               
+#plot foresting results
+autoplot(auto_with_humidity_reg_forecast) + 
   theme_light()
 
-# plot model + observed data
-autoplot(ts_daily, series = "Original") +
-  autolayer(ARIMA_Fourier_forecast_2, series = "ARIMA FOURIER 2", PI = FALSE) +
-  ylab("Daily Load") +
+#plot model + observed data
+autoplot(ts_load_daily, series = "Original") +
+  autolayer(auto_with_humidity_reg_forecast, series = "Auto Sarima W/ Humidity Reg", PI = FALSE) +
   theme_light()
 
-# check the MAPE
-ARIMA_Fourier_scores_2 <- accuracy(ARIMA_Fourier_forecast_2$mean, ts_daily_testing)
-ARIMA_Fourier_scores_2
+#check the MAPE
+auto_with_humidity_reg_scores <- accuracy(auto_with_humidity_reg_forecast$mean, ts_load_daily_testing)
+print(auto_with_humidity_reg_scores)
 
+arima_humidity_forecast <- auto_with_humidity_reg_forecast$mean
+
+getwd()
+submission_template <- read.csv(file="./submission_template.csv", header=TRUE)
+submission_template$date <- as.Date(submission_template$date, format = "%m/%d/%y")
+submission_template$load <- arima_humidity_forecast
+write.table(submission_template, "submission.csv", sep = ",", row.names = FALSE, quote = FALSE)
+
+```
