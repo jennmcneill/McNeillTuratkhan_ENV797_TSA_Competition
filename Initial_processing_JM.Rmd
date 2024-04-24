@@ -26,16 +26,19 @@ library(readxl)
 
 ```{r load data}
 
-file_path <- "./Data_NoGIT/Raw/load.xlsx"
-data <- read_excel(path = file_path)
+load <- read_excel("./Data_NoGIT/Raw/load.xlsx")
+humidity <- read_excel("./Data_NoGIT/Raw/relative_humidity.xlsx")
+temperature <- read_excel("./Data_NoGIT/Raw/temperature.xlsx")
 head(data)
+head(humidity)
+head(temperature)
 
 ``` 
 
-```{r prepare data}
+```{r wrangle load data}
 
 # create df with hourly values
-hourly_data <- data %>%
+hourly_data <- load %>%
   pivot_longer(h1:h24, names_to = "hour", values_to = "load") %>%
   mutate(hour = as.numeric(str_replace(hour, "h", ""))) %>%
   mutate(hour = hour - 1) %>%
@@ -55,7 +58,7 @@ summary(hourly_data$load)
 summary(daily_data$average_load)
 # there are no NAs in the daily average data, so we can make a time series without running the tsclean function
 
-# plot the daily values
+# plot the hourly values
 ggplot(hourly_data, aes(x = datetime, y = load)) +
   geom_line() +
   ylab("Hourly Load")
@@ -67,26 +70,50 @@ ggplot(daily_data, aes(x = date, y = average_load)) +
 
 ```
 
+```{r wrangle temperature and humidity data}
+  
+# create df with daily temp averages
+daily_temp <- temperature %>%
+  pivot_longer(t_ws1:t_ws28, names_to = "site", values_to = "temperature") %>%
+  group_by(date) %>%
+  summarise(average_temp = mean(temperature))
+
+# create df with daily relative humidity averages
+daily_humidity <- humidity %>%
+  pivot_longer(rh_ws1:rh_ws28, names_to = "site", values_to = "humidity") %>%
+  group_by(date) %>%
+  summarise(average_humidity = mean(humidity))
+
+```
+
 
 ```{r create time series objects}
 
-ts_hourly <- msts(hourly_data$load, 
+ts_load_hourly <- msts(hourly_data$load, 
                   seasonal.periods = c(24,168,8766), 
                   start = c(2005,1,1)) 
-tsclean(ts_hourly)
+tsclean(ts_load_hourly)
 
-ts_daily <- msts(daily_data$average_load, 
+ts_load_daily <- msts(daily_data$average_load, 
                  seasonal.periods = c(7,365.25),
                  start=c(2005,1,1))
+
+ts_temp_daily <- msts(daily_temp$average_temp, 
+                 seasonal.periods = c(7,365.25),
+                 start=c(2005,1,1))
+
+ts_humidity_daily <- msts(daily_humidity$average_humidity, 
+                          seasonal.periods = c(7,365.25),
+                          start=c(2005,1,1))
 ```
 
 ```{r decompose time series objects}
 
-ts_hourly %>% 
+ts_load_hourly %>% 
   mstl() %>%
   autoplot()
 
-ts_daily %>% 
+ts_load_daily %>% 
   mstl() %>%
   autoplot()
 
@@ -96,19 +123,19 @@ ts_daily %>%
 
 # create a subset of the time series that excludes one month
 n_for = 31
-ts_daily_training <- subset(ts_daily, end = length(ts_daily) - n_for)
+ts_load_daily_training <- subset(ts_load_daily, end = length(ts_load_daily) - n_for)
 
 # create a subset of the time series that only includes the last 365 days
-ts_daily_testing <- subset(ts_daily, start = length(ts_daily) - n_for)
+ts_load_daily_testing <- subset(ts_load_daily, start = length(ts_load_daily) - n_for)
 
-autoplot(ts_daily_training)
-autoplot(ts_daily_testing)
+autoplot(ts_load_daily_training)
+autoplot(ts_load_daily_testing)
 ```
 
 ```{r STL + ETS Model}
 
 # fit and forecast STL + ETS model to data
-ETS_fit <-  stlf(ts_daily_training, h = 31)
+ETS_fit <-  stlf(ts_load_daily_training, h = 31)
 
 # plot foresting results
 autoplot(ETS_fit) + 
@@ -116,13 +143,13 @@ autoplot(ETS_fit) +
   theme_light()
 
 # plot model + observed data
-autoplot(ts_daily, series = "Original") +
+autoplot(ts_load_daily, series = "Original") +
   autolayer(ETS_fit, series = "STL + ETS", PI = FALSE) +
   ylab("Daily Load") +
   theme_light()
 
 # check the MAPE
-STL_ETS_scores <- accuracy(ETS_fit$mean, ts_daily_testing)
+STL_ETS_scores <- accuracy(ETS_fit$mean, ts_load_daily_testing)
 
 STL_ETS_forecast <- ETS_fit$mean
 
@@ -133,6 +160,9 @@ submission_template$load <- STL_ETS_forecast
 write.table(submission_template, "submission.csv", sep = ",", row.names = FALSE, quote = FALSE)
 
 ```
+
+
+
 
 ```{r ARIMA and Fourier Model 1}
 
