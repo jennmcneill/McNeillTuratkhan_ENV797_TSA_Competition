@@ -10,7 +10,7 @@ editor_options:
     wrap: sentence
 ---
 
-```{r}
+```{r load packages, include=FALSE}
 library(lubridate)
 library(ggplot2)
 library(forecast)
@@ -24,7 +24,7 @@ library(kableExtra)
 library(readxl)
 ```
 
-```{r load data}
+```{r import data}
 
 load <- read_excel("./Data_NoGIT/Raw/load.xlsx")
 humidity <- read_excel("./Data_NoGIT/Raw/relative_humidity.xlsx")
@@ -178,7 +178,7 @@ write.table(submission_template, "submission.csv", sep = ",", row.names = FALSE,
 
 auto_arima_train <- auto.arima(ts_load_daily_training, seasonal=FALSE)
 
-auto_arima_test <- forecast(auto_arima_fit, h=31)
+auto_arima_test <- forecast(auto_arima_train, h=31)
                
 #plot foresting results
 autoplot(auto_arima_test) + 
@@ -213,7 +213,7 @@ write.table(submission_template, "submission.csv", sep = ",", row.names = FALSE,
 auto_with_temp_reg_train <- auto.arima(ts_load_daily_training, seasonal=FALSE, 
                              lambda=0, xreg=fourier(ts_temp_daily_training, K=c(2,12)))
 
-auto_with_temp_reg_test <- forecast(auto_with_temp_reg, 
+auto_with_temp_reg_test <- forecast(auto_with_temp_reg_train, 
                                         xreg=fourier(ts_temp_daily_training, K=c(2,12), h=31),
                                         h=31)
                
