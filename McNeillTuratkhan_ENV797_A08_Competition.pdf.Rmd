@@ -89,7 +89,7 @@ daily_humidity <- humidity %>%
 ```
 
 
-```{r create time series objects}
+```{r create time series objects, include=FALSE}
 
 ts_load_hourly <- msts(hourly_data$load, 
                   seasonal.periods = c(24,168,8766), 
@@ -109,7 +109,7 @@ ts_humidity_daily <- msts(daily_humidity$average_humidity,
                           start=c(2005,1,1))
 ```
 
-```{r decompose time series objects}
+```{r decompose time series objects, include=FALSE}
 
 ts_load_hourly %>% 
   mstl() %>%
