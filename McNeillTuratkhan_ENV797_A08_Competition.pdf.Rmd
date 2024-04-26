@@ -1,0 +1,254 @@
+---
+title: "Forecasting Competition Final Report - McNeill/Turatkhan"
+subtitle: "[GitHub Repository Link](https://github.com/jennmcneill/McNeillTuratkhan_ENV797_TSA_Competition)"
+author: "Jenn McNeill and Zhanylai Turatkhan kyzy"
+date: "04/01/2024"
+output: pdf_document
+always_allow_html: true
+editor_options: 
+  chunk_output_type: console
+  markdown: 
+    wrap: sentence
+---
+
+```{r load packages, include=FALSE}
+library(lubridate)
+library(ggplot2)
+library(forecast)
+library(Kendall)
+library(tseries)
+library(outliers)
+library(tidyverse)
+library(smooth)
+library(zoo)
+library(kableExtra)
+library(readxl)
+```
+
+```{r import data}
+
+load <- read_excel("./Data_NoGIT/Raw/load.xlsx")
+humidity <- read_excel("./Data_NoGIT/Raw/relative_humidity.xlsx")
+temperature <- read_excel("./Data_NoGIT/Raw/temperature.xlsx")
+head(data)
+head(humidity)
+head(temperature)
+
+``` 
+
+```{r wrangle load data}
+
+# create df with hourly values
+hourly_data <- load %>%
+  pivot_longer(h1:h24, names_to = "hour", values_to = "load") %>%
+  mutate(hour = as.numeric(str_replace(hour, "h", ""))) %>%
+  mutate(hour = hour - 1) %>%
+  mutate(datetime = ymd_h(paste(date, hour, sep = " "))) %>%
+  select(date, hour, datetime, load) 
+  
+# create df with daily averages
+daily_data <- hourly_data %>%
+  filter(!is.na(load)) %>%
+  group_by(date) %>%
+  summarise(average_load = mean(load))
+
+# check for NAs
+summary(hourly_data$load)
+# there are 7 missing hourly values, so we will need to run tsclean if we are using hourly data to make a time series
+
+summary(daily_data$average_load)
+# there are no NAs in the daily average data, so we can make a time series without running the tsclean function
+
+# plot the hourly values
+ggplot(hourly_data, aes(x = datetime, y = load)) +
+  geom_line() +
+  ylab("Hourly Load")
+
+# plot the daily averages
+ggplot(daily_data, aes(x = date, y = average_load)) +
+  geom_line() +
+  ylab("Average Daily Load")
+
+```
+
+```{r wrangle temperature and humidity data}
+  
+# create df with daily temp averages
+daily_temp <- temperature %>%
+  pivot_longer(t_ws1:t_ws28, names_to = "site", values_to = "temperature") %>%
+  group_by(date) %>%
+  summarise(average_temp = mean(temperature)) %>%
+  slice(1:2372)
+
+# create df with daily relative humidity averages
+daily_humidity <- humidity %>%
+  pivot_longer(rh_ws1:rh_ws28, names_to = "site", values_to = "humidity") %>%
+  group_by(date) %>%
+  summarise(average_humidity = mean(humidity))
+
+```
+
+
+```{r create time series objects}
+
+ts_load_hourly <- msts(hourly_data$load, 
+                  seasonal.periods = c(24,168,8766), 
+                  start = c(2005,1,1)) 
+tsclean(ts_load_hourly)
+
+ts_load_daily <- msts(daily_data$average_load, 
+                 seasonal.periods = c(7,365.25),
+                 start=c(2005,1,1))
+
+ts_temp_daily <- msts(daily_temp$average_temp, 
+                 seasonal.periods = c(7,365.25),
+                 start=c(2005,1,1))
+
+ts_humidity_daily <- msts(daily_humidity$average_humidity, 
+                          seasonal.periods = c(7,365.25),
+                          start=c(2005,1,1))
+```
+
+```{r decompose time series objects}
+
+ts_load_hourly %>% 
+  mstl() %>%
+  autoplot()
+
+ts_load_daily %>% 
+  mstl() %>%
+  autoplot()
+
+```
+
+```{r subset daily time series for training and testing}
+
+# create a subset of the time series that excludes one month
+n_for = 31
+ts_load_daily_training <- subset(ts_load_daily, end = length(ts_load_daily) - n_for)
+
+# create a subset of the time series that only includes the last month
+ts_load_daily_testing <- subset(ts_load_daily, start = length(ts_load_daily) - n_for)
+
+# repeat the process for temperature regressor
+ts_temp_daily_training <- subset(ts_temp_daily, end = length(ts_temp_daily) - n_for)
+ts_temp_daily_testing <- subset(ts_temp_daily, start = length(ts_temp_daily) - n_for)
+
+# repeat the process for humidity regressor
+ts_humidity_daily_training <- subset(ts_humidity_daily, end = length(ts_humidity_daily) - n_for)
+ts_humidity_daily_testing <- subset(ts_humidity_daily, start = length(ts_humidity_daily) - n_for)
+
+autoplot(ts_load_daily_training)
+autoplot(ts_load_daily_testing)
+```
+
+```{r STL + ETS Model}
+
+# fit and forecast STL + ETS model to data
+STL_ETS_test <-  stlf(ts_load_daily_training, h = 31)
+
+# plot model + observed data
+autoplot(ts_load_daily, series = "Original") +
+  autolayer(STL_ETS_test, series = "STL + ETS", PI = FALSE) +
+  ylab("Daily Load") +
+  theme_light()
+
+# check the MAPE
+STL_ETS_scores <- accuracy(STL_ETS_test$mean, ts_load_daily_testing)
+print(STL_ETS_scores)
+
+#use this model on the whole dataset to predict july 2011
+STL_ETS_forecast <- stlf(ts_load_daily, h = 31)
+
+autoplot(ts_load_daily, series = "Original") +
+  autolayer(STL_ETS_forecast, series = "STL + ETS", PI = FALSE) +
+  ylab("Daily Load") +
+  theme_light()
+
+STL_ETS_forecast_submission <- STL_ETS_forecast$mean
+
+getwd()
+submission_template <- read.csv(file="./submission_template.csv", header=TRUE)
+submission_template$date <- as.Date(submission_template$date, format = "%m/%d/%y")
+submission_template$load <- STL_ETS_forecast_submission
+write.table(submission_template, "submission.csv", sep = ",", row.names = FALSE, quote = FALSE)
+
+```
+
+```{r Auto Arima with No Regressor}
+
+auto_arima_train <- auto.arima(ts_load_daily_training, seasonal=FALSE)
+
+auto_arima_test <- forecast(auto_arima_train, h=31)
+               
+#plot foresting results
+autoplot(auto_arima_test) + 
+  theme_light()
+
+#plot model + observed data
+autoplot(ts_load_daily, series = "Original") +
+  autolayer(auto_arima_test, series = "Auto Arima", PI = FALSE) +
+  theme_light()
+
+#check the MAPE
+auto_arima_scores <- accuracy(auto_arima_test$mean, ts_load_daily_testing)
+print(auto_arima_scores)
+
+#use this model on the whole dataset to predict july 2011
+auto_arima <- auto.arima(ts_load_daily, seasonal=FALSE)
+auto_arima_forecast <- forecast(auto_arima, h=31)
+
+auto_arima_forecast_submission <- auto_arima_forecast$mean
+
+getwd()
+submission_template <- read.csv(file="./submission_template.csv", header=TRUE)
+submission_template$date <- as.Date(submission_template$date, format = "%m/%d/%y")
+submission_template$load <- auto_arima_forecast_submission
+write.table(submission_template, "submission.csv", sep = ",", row.names = FALSE, quote = FALSE)
+
+```
+
+
+```{r Auto Arima with Temperature Regressor}
+
+auto_with_temp_reg_train <- auto.arima(ts_load_daily_training, seasonal=FALSE, 
+                             lambda=0, xreg=fourier(ts_temp_daily_training, K=c(2,12)))
+
+auto_with_temp_reg_test <- forecast(auto_with_temp_reg_train, 
+                                        xreg=fourier(ts_temp_daily_training, K=c(2,12), h=31),
+                                        h=31)
+               
+#plot model + observed data
+autoplot(ts_load_daily, series = "Original") +
+  autolayer(auto_with_temp_reg_test, series = "Auto Sarima W/ Temp Reg", PI = FALSE) +
+  theme_light()
+
+#check the MAPE
+auto_with_temp_reg_scores <- accuracy(auto_with_temp_reg_test$mean, ts_load_daily_testing)
+print(auto_with_temp_reg_scores)
+
+```
+
+```{r Auto Arima with Humidity Regressor}
+
+auto_with_humidity_reg_train <- auto.arima(ts_load_daily_training, seasonal=FALSE, 
+                             lambda=0, xreg=fourier(ts_humidity_daily_training, K=c(2,4)))
+
+auto_with_humidity_reg_test <- forecast(auto_with_humidity_reg_train, 
+                                        xreg=fourier(ts_humidity_daily_training, K=c(2,4), h=31),
+                                        h=31)
+               
+#plot model + observed data
+autoplot(ts_load_daily, series = "Original") +
+  autolayer(auto_with_humidity_reg_test, series = "Auto Sarima W/ Humidity Reg", PI = FALSE) +
+  theme_light()
+
+#check the MAPE
+auto_with_humidity_reg_scores <- accuracy(auto_with_humidity_reg_test$mean, ts_load_daily_testing)
+print(auto_with_humidity_reg_scores)
+
+```
+
+
+
+
