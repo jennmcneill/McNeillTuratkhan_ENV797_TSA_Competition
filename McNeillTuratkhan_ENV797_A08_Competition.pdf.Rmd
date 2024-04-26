@@ -249,6 +249,39 @@ print(auto_with_humidity_reg_scores)
 
 ```
 
+```{r TBATS}
+TBATS_fit <- tbats(ts_load_daily_training)
+
+TBATS_for <- forecast(TBATS_fit, h=31)
+
+#Plot foresting results
+autoplot(TBATS_for) +
+  ylab("Load") 
+
+#Plot model + observed data
+autoplot(ts_load_daily) +
+  autolayer(TBATS_for, series="TBATS",PI=FALSE)+
+  ylab("Load") 
+```
+
+```{r TBATS scores and retraining}
+TBATS_scores <- accuracy(TBATS_for$mean, ts_load_daily_testing)
+print(TBATS_scores)
+
+#retraining for the whole dataset to predict july 2011
+TBATS_kaggle_fit <- tbats(ts_load_daily)
+TBATS_kaggle_for <- forecast(TBATS_kaggle_fit, h=31)
+
+TBATS_forecast_submission <- TBATS_kaggle_for$mean
+
+# the best score as of now in Kaggle
+getwd()
+submission_template <- read.csv(file="./submission_template.csv", header=TRUE)
+submission_template$date <- as.Date(submission_template$date, format = "%m/%d/%y")
+submission_template$load <- TBATS_forecast_submission
+write.table(submission_template, "submission.csv", sep = ",", row.names = FALSE, quote = FALSE)
+```
+
 
 
 
